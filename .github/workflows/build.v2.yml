@@ -1,4 +1,4 @@
-name: Build mp4box & Push to kimycai/mp4box
+name: Build MP4Box & Push to kimycai/mp4box
 # 纯手动触发，无自动执行规则
 on:
   workflow_dispatch:
@@ -13,14 +13,14 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      # 步骤2：拉取你的 kimycai/mp4box 仓库（核心：path指定相对路径，Git目录自动生成）
+      # 步骤2：拉取修改后的 kimycai/mp4box 仓库（核心：仓库名改为小写mp4box）
       - name: Checkout kimycai/mp4box Repository
         uses: actions/checkout@v4
         with:
-          repository: kimycai/mp4box
+          repository: kimycai/mp4box  # 适配：仓库名改为小写mp4box
           ref: main
           token: ${{ secrets.WRAPPER_PUSH_TOKEN }}
-          path: mp4box  # 相对路径，实际Git目录为 ./mp4box（含.git文件夹）
+          path: mp4box-repo  # 目录名同步改为小写，避免混淆
           fetch-depth: 1
 
       # 步骤3：安装GPAC编译依赖 + 清理缓存
@@ -31,39 +31,38 @@ jobs:
           sudo apt clean
           sudo rm -rf /var/lib/apt/lists/*
 
-      # 步骤4：拉取GPAC官方源码（github.com/gpac/gpac.git，浅克隆提速）
+      # 步骤4：拉取GPAC官方源码（浅克隆提速，不影响编译）
       - name: Clone GPAC Official Source Code
         run: |
-          mkdir -p gpac-build  # 相对路径创建编译目录，避免路径混乱
+          mkdir -p gpac-build
           cd gpac-build
           git clone --depth 1 https://github.com/gpac/gpac.git
           cd gpac
 
-      # 步骤5：静态编译mp4box（官方配置：禁用zlib + 4线程）
-      - name: Build Static mp4box
+      # 步骤5：静态编译MP4Box（官方配置，无动态依赖，跨系统兼容）
+      - name: Build Static MP4Box
         run: |
           cd gpac-build/gpac
           ./configure --static-mp4box --use-zlib=no
           make -j4
 
-      # 步骤6：复制编译产物到mp4box仓库根目录 + 赋权（修正路径：指向相对路径的Git仓库）
-      - name: Copy mp4box to mp4box Git Repo
+      # 步骤6：复制产物并**重命名为小写mp4box** + 赋权（核心需求）
+      - name: Copy & Rename MP4Box to mp4box
         run: |
-          # 从编译目录复制产物到 ./mp4box（正确的Git仓库根目录）
-          cp gpac-build/gpac/bin/gcc/mp4box ./mp4box/
-          # 赋予可执行权限，双重保障
-          chmod +x ./mp4box/mp4box
-          # 验证产物：确认文件存在且带可执行权限
-          ls -lahp ./mp4box/mp4box
+          # 复制编译产物并直接重命名为小写mp4box，推送到仓库根目录
+          cp gpac-build/gpac/bin/gcc/MP4Box ./mp4box-repo/mp4box
+          # 双重赋予可执行权限，保障推送后可直接运行
+          chmod +x ./mp4box-repo/mp4box
+          # 验证产物：确认小写mp4box存在且带可执行权限
+          ls -lahp ./mp4box-repo/mp4box
 
-      # 步骤7：提交并推送（核心修正：进入相对路径的Git仓库，所有git命令正常执行）
+      # 步骤7：提交小写mp4box并推送至 kimycai/mp4box 仓库
       - name: Commit & Push mp4box to kimycai/mp4box
         run: |
-          # 进入正确的Git仓库目录（含.git文件夹，无目录错误）
-          cd ./mp4box
-          # 仅暂存mp4box文件，精准提交无冗余
+          cd ./mp4box-repo  # 进入正确的Git仓库目录（含.git）
+          # 仅暂存小写mp4box文件，不影响仓库现有ffmpeg等文件
           git add ./mp4box
-          # 提交信息带时间戳，便于版本追溯
-          git commit -m "Update mp4box (static build | GPAC official | Ubuntu24.04) - $(date +%Y%m%d_%H%M%S)" || echo "No changes to commit (mp4box is already the latest)"
+          # 提交信息标注仓库名+小写，便于版本追溯
+          git commit -m "Update mp4box (static build | lowercase | GPAC official | Ubuntu24.04) - $(date +%Y%m%d_%H%M%S)" || echo "No changes to commit (mp4box is already the latest)"
           # 推送到远程main分支（Action自动关联origin，无需手动配置）
           git push origin main
