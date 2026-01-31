@@ -9,7 +9,7 @@ env:
   FFMPEG_VERSION: 6.1.1          # FFmpeg稳定版本（适配Ubuntu24.04）
   # 编译核心配置：仅保留m4a→flac所需功能，静态编译，最小化构建
   FFMPEG_CONFIG: --prefix=/usr/local --disable-all --enable-static --disable-shared \
-    --enable-avcodec --enable-avformat --enable-avutil --enable-swresample \
+    --enable-avformat --enable-avutil --enable-swresample \
     --enable-decoder=aac,alac,mp3 --enable-encoder=flac \
     --enable-muxer=flac --enable-demuxer=aac,mp4,m4a \
     --enable-protocol=file --disable-doc --disable-ffplay --disable-ffprobe \
