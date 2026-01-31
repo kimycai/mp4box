@@ -1,0 +1,100 @@
+name: Build FFmpeg (Ubuntu24.04) & Push to kimycai/MP4BOX
+# 仅手动触发，灵活控制编译时机
+on:
+  workflow_dispatch:
+
+env:
+  DOCKER_BUILDKIT: 1 # 启用Docker BuildKit加速构建
+  TARGET_REPO: kimycai/MP4BOX # 目标推送仓库
+  TARGET_BRANCH: main # 推送到仓库main分支
+
+jobs:
+  build-ffmpeg-push:
+    name: Build FFmpeg Ubuntu24.04 & Push to MP4BOX
+    runs-on: ubuntu-24.04 # 原生Ubuntu24.04，编译产物原生兼容
+    steps:
+      # 步骤1：配置Git全局身份（推送仓库必备，标准写法）
+      - name: Configure Git Global Identity
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      # 步骤2：拉取你的 kimycai/MP4BOX 仓库（含.git，用于后续推送）
+      - name: Checkout kimycai/MP4BOX Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_BRANCH }}
+          token: ${{ secrets.WRAPPER_PUSH_TOKEN }} # 复用原有令牌，无需新配置
+          path: MP4BOX # 相对路径，含完整.git仓库，避免路径混乱
+          fetch-depth: 1 # 浅克隆提速
+
+      # 步骤3：清理磁盘空间（解决Actions运行器磁盘不足问题）
+      - name: Free Up Disk Space
+        run: |
+          df -h
+          sudo apt-get clean
+          docker system prune -a -f || true
+          sudo rm -rf /opt/ghc /usr/local/.ghcup /usr/local/lib/android /var/lib/apt/lists/*
+          df -h
+
+      # 步骤4：拉取FFmpeg-Builds官方编译脚本
+      - name: Checkout FFmpeg-Builds Source
+        uses: actions/checkout@v4
+        with:
+          repository: BtbN/FFmpeg-Builds
+          fetch-depth: 1 # 浅克隆仅拉取最新代码，提速
+          path: ffmpeg-builds # 独立目录，避免与MP4BOX仓库冲突
+
+      # 步骤5：配置Docker Buildx（编译FFmpeg基础镜像必备）
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config: ${{ github.workspace }}/ffmpeg-builds/.github/buildkit.toml
+
+      # 步骤6：登录GHCR（拉取FFmpeg基础镜像权限，Actions自动赋权）
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # 步骤7：编译FFmpeg（仅linux64-gpl，满足m4a→flac最小需求）
+      - name: Build FFmpeg for Ubuntu24.04 (linux64)
+        run: |
+          cd ${{ github.workspace }}/ffmpeg-builds
+          # 生成linux64-gpl编译配置（最小化，仅含m4a/flac编解码）
+          ./generate.sh linux64 gpl
+          # 执行编译，生成静态可执行文件
+          T="$(echo -n ${{ github.token }} | sha256sum | head -c 64)"
+          echo -e "::add-mask::${T}\n::stop-commands::${T}"
+          ./build.sh linux64 gpl
+
+      # 步骤8：提取并复制ffmpeg可执行文件到MP4BOX仓库根目录
+      - name: Extract FFmpeg Binary to MP4BOX Repo
+        run: |
+          # 查找编译后的ffmpeg压缩包（ubuntu24.04 linux64版本）
+          FFMPEG_TAR=$(find ${{ github.workspace }}/ffmpeg-builds/artifacts -name "*-linux64-*.tar.xz" | head -1)
+          # 创建临时目录解压
+          mkdir -p ${{ github.workspace }}/ffmpeg-tmp
+          tar -xJf $FFMPEG_TAR -C ${{ github.workspace }}/ffmpeg-tmp
+          # 提取静态ffmpeg可执行文件到MP4BOX仓库根目录
+          cp ${{ github.workspace }}/ffmpeg-tmp/bin/ffmpeg ${{ github.workspace }}/MP4BOX/
+          # 赋予可执行权限（双重保障，避免推送后权限丢失）
+          chmod +x ${{ github.workspace }}/MP4BOX/ffmpeg
+          # 验证文件：确认存在且带可执行权限
+          ls -lahp ${{ github.workspace }}/MP4BOX/ffmpeg
+          # 验证ffmpeg功能（确认支持m4a/flac编解码）
+          ${{ github.workspace }}/MP4BOX/ffmpeg -codecs | grep -E 'aac|flac'
+
+      # 步骤9：提交并推送到 kimycai/MP4BOX 远程仓库
+      - name: Commit & Push FFmpeg to MP4BOX
+        run: |
+          cd ${{ github.workspace }}/MP4BOX
+          # 仅暂存ffmpeg文件，不影响仓库原有文件（如MP4Box）
+          git add ./ffmpeg
+          # 提交信息带时间戳，便于追溯编译版本
+          git commit -m "Update FFmpeg (Ubuntu24.04 | linux64 | m4a→flac) - $(date +%Y%m%d_%H%M%S)" || echo "No changes to commit (FFmpeg is already the latest)"
+          # 推送到远程main分支（Action自动关联origin，无需手动配置）
+          git push origin ${{ env.TARGET_BRANCH }}
