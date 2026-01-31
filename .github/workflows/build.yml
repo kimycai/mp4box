@@ -1,5 +1,5 @@
 name: Build MP4Box & Push to kimycai/MP4BOX
-# 触发条件：仅手动触发（Workflow Dispatch），灵活控制编译时机
+# 纯手动触发，无自动执行规则
 on:
   workflow_dispatch:
 
@@ -7,66 +7,63 @@ jobs:
   build-and-push-mp4box:
     runs-on: ubuntu-24.04
     steps:
-      # 步骤1：配置Git全局身份（推送仓库必备，标准写法）
+      # 步骤1：配置Git全局身份（推送仓库必备）
       - name: Configure Git Global Identity
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      # 步骤2：拉取你的目标仓库 kimycai/MP4BOX（用于推送编译产物）
+      # 步骤2：拉取你的 kimycai/MP4BOX 仓库（核心：path指定相对路径，Git目录自动生成）
       - name: Checkout kimycai/MP4BOX Repository
         uses: actions/checkout@v4
         with:
-          repository: kimycai/MP4BOX  # 固定指向你的MP4BOX仓库
-          ref: main                   # 推送到main分支
-          token: ${{ secrets.WRAPPER_PUSH_TOKEN }}  # 复用原有令牌，无需重新配置
-          path: MP4BOX                # 独立目录存放仓库，避免路径冲突
-          fetch-depth: 1              # 浅克隆，提升拉取速度
+          repository: kimycai/MP4BOX
+          ref: main
+          token: ${{ secrets.WRAPPER_PUSH_TOKEN }}
+          path: MP4BOX  # 相对路径，实际Git目录为 ./MP4BOX（含.git文件夹）
+          fetch-depth: 1
 
-      # 步骤3：安装GPAC官方编译依赖 + 清理缓存
+      # 步骤3：安装GPAC编译依赖 + 清理缓存
       - name: Install Build Dependencies
         run: |
           sudo apt update -y
-          # 安装官方编译必需依赖，精简无冗余
           sudo apt install -y --no-install-recommends gcc make zlib1g-dev ca-certificates
-          # 清理apt缓存，释放Actions运行空间，避免磁盘不足
           sudo apt clean
           sudo rm -rf /var/lib/apt/lists/*
 
       # 步骤4：拉取GPAC官方源码（github.com/gpac/gpac.git，浅克隆提速）
       - name: Clone GPAC Official Source Code
         run: |
-          mkdir -p /home/runner/work/gpac-build  # 创建专属编译目录
-          cd /home/runner/work/gpac-build
-          # 浅克隆仅拉取最新代码，大幅提升克隆速度
+          mkdir -p gpac-build  # 相对路径创建编译目录，避免路径混乱
+          cd gpac-build
           git clone --depth 1 https://github.com/gpac/gpac.git
-          cd gpac  # 进入官方源码根目录，准备编译
+          cd gpac
 
-      # 步骤5：静态编译MP4Box（核心配置：禁用zlib + 4线程加速）
-      - name: Build Static MP4Box (Official Config)
+      # 步骤5：静态编译MP4Box（官方配置：禁用zlib + 4线程）
+      - name: Build Static MP4Box
         run: |
-          cd /home/runner/work/gpac-build/gpac
-          # 官方静态编译配置，与你的需求一致，生成无依赖可执行文件
+          cd gpac-build/gpac
           ./configure --static-mp4box --use-zlib=no
-          make -j4  # 多线程编译，适配Ubuntu24.04算力
+          make -j4
 
-      # 步骤6：复制编译产物到MP4BOX仓库根目录 + 赋权
-      - name: Copy MP4Box to kimycai/MP4BOX Root
+      # 步骤6：复制编译产物到MP4BOX仓库根目录 + 赋权（修正路径：指向相对路径的Git仓库）
+      - name: Copy MP4Box to MP4BOX Git Repo
         run: |
-          # 复制静态编译产物到仓库根目录
-          cp /home/runner/work/gpac-build/gpac/bin/gcc/MP4Box /home/runner/work/MP4BOX/
-          # 双重赋予可执行权限，避免编译/复制过程中权限丢失
-          chmod +x /home/runner/work/MP4BOX/MP4Box
-          # 验证产物：查看文件信息，确认可执行权限
-          ls -lahp /home/runner/work/MP4BOX/MP4Box
+          # 从编译目录复制产物到 ./MP4BOX（正确的Git仓库根目录）
+          cp gpac-build/gpac/bin/gcc/MP4Box ./MP4BOX/
+          # 赋予可执行权限，双重保障
+          chmod +x ./MP4BOX/MP4Box
+          # 验证产物：确认文件存在且带可执行权限
+          ls -lahp ./MP4BOX/MP4Box
 
-      # 步骤7：提交并推送到 kimycai/MP4BOX 远程仓库
-      - name: Commit & Push MP4Box to Repository
+      # 步骤7：提交并推送（核心修正：进入相对路径的Git仓库，所有git命令正常执行）
+      - name: Commit & Push MP4Box to kimycai/MP4BOX
         run: |
-          cd /home/runner/work/MP4BOX
-          # 仅精准暂存MP4Box文件，不提交其他无关变更
+          # 进入正确的Git仓库目录（含.git文件夹，无目录错误）
+          cd ./MP4BOX
+          # 仅暂存MP4Box文件，精准提交无冗余
           git add ./MP4Box
-          # 提交信息带版本标识，便于追溯编译版本
-          git commit -m "Update MP4Box (static build | GPAC official | Ubuntu24.04) - $(date +%Y%m%d_%H%M%S)" || echo "No changes to commit (MP4Box is already the latest version)"
-          # 推送到main分支，Action自动关联origin远程
+          # 提交信息带时间戳，便于版本追溯
+          git commit -m "Update MP4Box (static build | GPAC official | Ubuntu24.04) - $(date +%Y%m%d_%H%M%S)" || echo "No changes to commit (MP4Box is already the latest)"
+          # 推送到远程main分支（Action自动关联origin，无需手动配置）
           git push origin main
