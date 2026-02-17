@@ -1,0 +1,141 @@
+name: Build MP4Box & Push to kimycai/MP4BOX
+# 纯手动触发，无自动执行规则
+on:
+  workflow_dispatch:
+
+jobs:
+  build-mp4box-linux:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit_msg: ${{ steps.generate-commit-msg.outputs.msg }}
+    steps:
+      # 步骤1：生成提交信息
+      - name: Generate Commit Message
+        id: generate-commit-msg
+        run: |
+          msg="Update MP4Box (static build | GPAC official | Linux) - $(date +%Y%m%d_%H%M%S)"
+          echo "msg=$msg" >> $GITHUB_OUTPUT
+          
+      # 步骤2：配置Git全局身份（推送仓库必备）
+      - name: Configure Git Global Identity
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      # 步骤3：拉取你的 kimycai/MP4BOX 仓库（核心：path指定相对路径，Git目录自动生成）
+      - name: Checkout kimycai/MP4BOX Repository
+        uses: actions/checkout@v4
+        with:
+          repository: kimycai/MP4BOX
+          ref: main
+          token: ${{ secrets.WRAPPER_PUSH_TOKEN }}
+          path: MP4BOX  # 相对路径，实际Git目录为 ./MP4BOX（含.git文件夹）
+          fetch-depth: 1
+
+      # 步骤4：安装GPAC编译依赖 + 清理缓存
+      - name: Install Build Dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install -y --no-install-recommends gcc make zlib1g-dev ca-certificates
+          sudo apt clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+      # 步骤5：拉取GPAC官方源码（github.com/gpac/gpac.git，浅克隆提速）
+      - name: Clone GPAC Official Source Code
+        run: |
+          mkdir -p gpac-build  # 相对路径创建编译目录，避免路径混乱
+          cd gpac-build
+          git clone --depth 1 https://github.com/gpac/gpac.git
+          cd gpac
+
+      # 步骤6：静态编译MP4Box（官方配置：禁用zlib + 4线程）
+      - name: Build Static MP4Box
+        run: |
+          cd gpac-build/gpac
+          ./configure --static-mp4box --use-zlib=no
+          make -j4
+
+      # 步骤7：复制编译产物到MP4BOX仓库根目录 + 赋权（修正路径：指向相对路径的Git仓库）
+      - name: Copy MP4Box to MP4BOX Git Repo
+        run: |
+          # 从编译目录复制产物到 ./MP4BOX（正确的Git仓库根目录）
+          cp gpac-build/gpac/bin/gcc/MP4Box ./MP4BOX/MP4Box
+          # 赋予可执行权限，双重保障
+          chmod +x ./MP4BOX/MP4Box
+          # 验证产物：确认文件存在且带可执行权限
+          ls -lahp ./MP4BOX/MP4Box
+
+  build-mp4box-windows:
+    runs-on: ubuntu-24.04  # 使用Ubuntu交叉编译Windows版本
+    outputs:
+      commit_msg: ${{ steps.generate-commit-msg.outputs.msg }}
+    steps:
+      # 步骤1：生成提交信息
+      - name: Generate Commit Message
+        id: generate-commit-msg
+        run: |
+          msg="Update MP4Box.exe (static build | GPAC official | Windows) - $(date +%Y%m%d_%H%M%S)"
+          echo "msg=$msg" >> $GITHUB_OUTPUT
+
+      # 步骤2：安装交叉编译工具链和依赖
+      - name: Install Cross-compilation Tools
+        run: |
+          sudo apt update -y
+          sudo apt install -y --no-install-recommends gcc-mingw-w64-x86-64 gcc make mingw-w64-tools zlib1g-dev ca-certificates
+          sudo apt clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+      # 步骤3：拉取GPAC官方源码（github.com/gpac/gpac.git，浅克隆提速）
+      - name: Clone GPAC Official Source Code
+        run: |
+          mkdir -p gpac-build-win  # 相对路径创建编译目录，避免路径混乱
+          cd gpac-build-win
+          git clone --depth 1 https://github.com/gpac/gpac.git
+          cd gpac
+
+      # 步骤4：静态交叉编译MP4Box for Windows
+      - name: Build Static MP4Box for Windows
+        run: |
+          cd gpac-build-win/gpac
+          # 使用mingw-w64进行交叉编译
+          ./configure --static-mp4box --use-zlib=no --host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32-
+          make -j4
+
+      # 步骤5：复制编译产物到MP4BOX仓库根目录
+      - name: Copy MP4Box.exe to MP4BOX Git Repo
+        run: |
+          # 从编译目录复制产物到 ./MP4BOX（正确的Git仓库根目录）
+          cp gpac-build-win/gpac/bin/gcc/MP4Box.exe ./MP4BOX/MP4Box.exe
+          # 验证产物：确认文件存在
+          ls -lahp ./MP4BOX/MP4Box.exe
+
+  push-all-binaries:
+    needs: [build-mp4box-linux, build-mp4box-windows]
+    runs-on: ubuntu-24.04
+    steps:
+      # 步骤1：配置Git全局身份（推送仓库必备）
+      - name: Configure Git Global Identity
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      # 步骤2：拉取kimycai/MP4BOX仓库
+      - name: Checkout kimycai/MP4BOX Repository
+        uses: actions/checkout@v4
+        with:
+          repository: kimycai/MP4BOX
+          ref: main
+          token: ${{ secrets.WRAPPER_PUSH_TOKEN }}
+          path: MP4BOX
+          fetch-depth: 1
+
+      # 步骤3：提交所有二进制文件并推送
+      - name: Commit & Push All Binaries to kimycai/MP4BOX
+        run: |
+          cd ./MP4BOX
+          # 添加所有平台的二进制文件
+          git add ./MP4Box
+          git add ./MP4Box.exe
+          # 提交信息包含所有平台
+          git commit -m "Update MP4Box binaries (Linux & Windows static builds | GPAC official) - $(date +%Y%m%d_%H%M%S)" || echo "No changes to commit (binaries are already the latest)"
+          git push origin main
