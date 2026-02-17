@@ -87,8 +87,47 @@ jobs:
       # 步骤3：使用Visual Studio编译MP4Box（最小化解决方案，零依赖）
       - name: Build Static MP4Box with Visual Studio
         run: |
-          # 进入Visual Studio编译目录（使用最小化解决方案）
-          cd gpac\build\msvc10
+          # 检查并进入Visual Studio编译目录
+          $buildDirs = @("gpac\build\msvc10", "gpac\build\msvc14", "gpac\build\msvc")
+          
+          $selectedDir = $null
+          foreach ($dir in $buildDirs) {
+              if (Test-Path $dir) {
+                  $selectedDir = $dir
+                  Write-Host "Found build directory: $dir"
+                  break
+              }
+          }
+          
+          if (-not $selectedDir) {
+              # 如果没找到预设的目录，列出gpac\build下的所有目录
+              Write-Host "Looking for build directories in gpac\build..."
+              Get-ChildItem -Path "gpac\build" -Directory | ForEach-Object {
+                  Write-Host "Found directory: $($_.Name)"
+              }
+              throw "No supported build directory found in gpac\build"
+          }
+          
+          Set-Location $selectedDir
+          
+          # 检查是否存在最小化解决方案文件
+          $solutionFile = $null
+          if (Test-Path "gpac_mp4box_mini.sln") {
+              $solutionFile = "gpac_mp4box_mini.sln"
+              Write-Host "Found minimal solution: $solutionFile"
+          } elseif (Test-Path "gpac.sln") {
+              $solutionFile = "gpac.sln"
+              Write-Host "Found main solution: $solutionFile"
+          } else {
+              # 查找任何 .sln 文件
+              $slnFiles = Get-ChildItem -Path . -Filter "*.sln" -Name
+              if ($slnFiles.Count -gt 0) {
+                  $solutionFile = $slnFiles[0]
+                  Write-Host "Found solution file: $solutionFile"
+              } else {
+                  throw "No solution file found in $selectedDir"
+              }
+          }
           
           # 查找并使用Visual Studio Developer Command Prompt
           $vsInstallerPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -130,8 +169,14 @@ jobs:
           
           Write-Host "Using MSBuild at: $msbuild"
           
-          # 编译Release版本的MP4Box（使用最小化解决方案）
-          & $msbuild gpac_mp4box_mini.sln /p:Configuration=Release /p:Platform=Win32 /m
+          # 根据解决方案类型选择合适的配置
+          if ($solutionFile -eq "gpac_mp4box_mini.sln") {
+              # 编译Release版本的MP4Box（使用最小化解决方案）
+              & $msbuild $solutionFile /p:Configuration=Release /p:Platform=Win32 /m
+          } else {
+              # 如果不是最小化解决方案，尝试编译MP4Box_only配置
+              & $msbuild $solutionFile /p:Configuration="Release - MP4Box_only" /p:Platform=x64 /p:PlatformToolset=v143 /m
+          }
 
       # 步骤4：复制编译产物到MP4BOX仓库根目录
       - name: Copy MP4Box.exe to MP4BOX Git Repo
