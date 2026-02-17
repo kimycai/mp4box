@@ -133,13 +133,42 @@ jobs:
           # 编译X64 Release版本的MP4Box_only（现代方法）
           & $msbuild gpac.sln /maxcpucount /t:Rebuild /p:Configuration="Release - MP4Box_only" /p:Platform=x64 /p:PlatformToolset=v143 /m
 
-      # 步骤4：上传编译产物（使用artifacts方式）
-      - name: Upload MP4Box.exe Artifact
+      # 步骤4：重命名并上传编译产物
+      - name: Rename and Upload MP4Box.exe Artifact
+        run: |
+          # 检查编译产物是否存在
+          $sourcePath = "gpac\bin\x64\Release - MP4Box_only\mp4box.exe"
+          if (Test-Path $sourcePath) {
+              # 创建输出目录
+              New-Item -ItemType Directory -Force -Path "./MP4BOX"
+              # 复制并重命名文件
+              Copy-Item $sourcePath -Destination "./MP4BOX/MP4Box.exe" -Force
+              Write-Host "Successfully renamed mp4box.exe to MP4Box.exe"
+          } else {
+              Write-Host "Warning: Expected binary not found at $sourcePath"
+              # 尝试查找可能的其他路径
+              Get-ChildItem -Path "gpac\bin" -Recurse -Name "mp4box.exe" | ForEach-Object {
+                  $foundPath = "gpac\bin\$_"
+                  Write-Host "Found mp4box.exe at: $foundPath"
+                  New-Item -ItemType Directory -Force -Path "./MP4BOX"
+                  Copy-Item $foundPath -Destination "./MP4BOX/MP4Box.exe" -Force
+              }
+          }
+
+          # 验证产物：确认文件存在
+          if (Test-Path "./MP4BOX/MP4Box.exe") {
+              Get-ChildItem "./MP4BOX/MP4Box.exe"
+          } else {
+              throw "MP4Box.exe was not found in the expected location. Check build logs for errors."
+          }
+          
+      # 步骤5：上传重命名后的产物
+      - name: Upload Renamed MP4Box.exe Artifact
         uses: actions/upload-artifact@v4
         with:
           name: mp4box-windows-x64
-          path: gpac\bin\x64\Release - MP4Box_only\mp4box.exe
-          if-no-files-found: warn
+          path: ./MP4BOX/MP4Box.exe
+          if-no-files-found: error
 
   push-all-binaries:
     needs: [build-mp4box-linux, build-mp4box-windows]
@@ -161,7 +190,14 @@ jobs:
           path: MP4BOX
           fetch-depth: 1
 
-      # 步骤3：提交所有二进制文件并推送
+      # 步骤3：下载Windows编译产物
+      - name: Download Windows Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: mp4box-windows-x64
+          path: ./MP4BOX/
+
+      # 步骤4：提交所有二进制文件并推送
       - name: Commit & Push All Binaries to kimycai/MP4BOX
         run: |
           cd ./MP4BOX
