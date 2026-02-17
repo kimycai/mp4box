@@ -136,10 +136,28 @@ jobs:
       # 步骤4：复制编译产物到MP4BOX仓库根目录
       - name: Copy MP4Box.exe to MP4BOX Git Repo
         run: |
-          # 从编译目录复制产物到 ./MP4BOX（正确的Git仓库根目录）
-          Copy-Item "gpac\bin\x64\Release - MP4Box_only\mp4box.exe" -Destination "./MP4BOX/MP4Box.exe" -Force
+          # 检查编译产物是否存在
+          $sourcePath = "gpac\bin\x64\Release - MP4Box_only\mp4box.exe"
+          if (-Not (Test-Path $sourcePath)) {
+              # 如果上述路径不存在，尝试其他可能的路径
+              Write-Host "Checking alternative output paths..."
+              Get-ChildItem -Path "gpac\bin" -Recurse -Name "mp4box.exe" | ForEach-Object {
+                  $foundPath = "gpac\bin\$_"
+                  Write-Host "Found mp4box.exe at: $foundPath"
+                  Copy-Item $foundPath -Destination "./MP4BOX/MP4Box.exe" -Force
+              }
+          } else {
+              # 从编译目录复制产物到 ./MP4BOX（正确的Git仓库根目录）
+              Write-Host "Found mp4box.exe at: $sourcePath"
+              Copy-Item $sourcePath -Destination "./MP4BOX/MP4Box.exe" -Force
+          }
+          
           # 验证产物：确认文件存在
-          Get-ChildItem "./MP4BOX/MP4Box.exe"
+          if (Test-Path "./MP4BOX/MP4Box.exe") {
+              Get-ChildItem "./MP4BOX/MP4Box.exe"
+          } else {
+              throw "MP4Box.exe was not found in the expected location. Check build logs for errors."
+          }
 
   push-all-binaries:
     needs: [build-mp4box-linux, build-mp4box-windows]
