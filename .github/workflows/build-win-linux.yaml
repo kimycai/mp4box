@@ -83,13 +83,22 @@ jobs:
           git clone --depth 1 https://github.com/gpac/gpac.git
           cd gpac
 
-      # 步骤3：使用Visual Studio编译MP4Box（最小化解决方案，零依赖）
+      # 步骤3：使用Visual Studio编译MP4Box X64版本
       - name: Build Static MP4Box with Visual Studio
         run: |
           # 进入Visual Studio编译目录
-          cd gpac\build\msvc10
-          # 使用MSBuild编译解决方案
-          $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+          cd gpac\build\msvc14
+          # 使用MSBuild编译解决方案，X64版本，仅编译MP4Box
+          $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+          if (-not (Test-Path $msbuild)) {
+              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe"
+          }
+          if (-not (Test-Path $msbuild)) {
+              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+          }
+          if (-not (Test-Path $msbuild)) {
+              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+          }
           if (-not (Test-Path $msbuild)) {
               $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe"
           }
@@ -97,26 +106,17 @@ jobs:
               $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe"
           }
           if (-not (Test-Path $msbuild)) {
-              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2017\Enterprise\MSBuild\15.0\Bin\MSBuild.exe"
-          }
-          if (-not (Test-Path $msbuild)) {
-              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2017\Professional\MSBuild\15.0\Bin\MSBuild.exe"
-          }
-          if (-not (Test-Path $msbuild)) {
-              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2017\Community\MSBuild\15.0\Bin\MSBuild.exe"
-          }
-          if (-not (Test-Path $msbuild)) {
               $msbuild = "MSBuild.exe"  # fallback to PATH
           }
           
-          # 编译Release版本的MP4Box
-          & $msbuild gpac_mp4box_mini.sln /p:Configuration=Release /p:Platform=Win32 /m
+          # 编译X64 Release版本的MP4Box_only
+          & $msbuild gpac.sln /maxcpucount /t:Rebuild /p:Configuration="Release - MP4Box_only" /p:Platform=x64 /m
 
       # 步骤4：复制编译产物到MP4BOX仓库根目录
       - name: Copy MP4Box.exe to MP4BOX Git Repo
         run: |
           # 从编译目录复制产物到 ./MP4BOX（正确的Git仓库根目录）
-          Copy-Item "gpac\bin\Release\mp4box.exe" -Destination "./MP4BOX/MP4Box.exe" -Force
+          Copy-Item "gpac\bin\x64\Release - MP4Box_only\mp4box.exe" -Destination "./MP4BOX/MP4Box.exe" -Force
           # 验证产物：确认文件存在
           Get-ChildItem "./MP4BOX/MP4Box.exe"
 
