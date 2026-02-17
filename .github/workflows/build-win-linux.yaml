@@ -88,26 +88,46 @@ jobs:
         run: |
           # 进入Visual Studio编译目录
           cd gpac\build\msvc14
-          # 使用MSBuild编译解决方案，X64版本，仅编译MP4Box
-          $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
-          if (-not (Test-Path $msbuild)) {
-              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe"
+          
+          # 查找并使用Visual Studio Developer Command Prompt
+          $vsInstallerPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vsInstallerPath) {
+              $vsPath = & $vsInstallerPath -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+              if ($vsPath) {
+                  $msbuildPath = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
+                  if (Test-Path $msbuildPath) {
+                      $msbuild = $msbuildPath
+                  }
+              }
           }
-          if (-not (Test-Path $msbuild)) {
-              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+          
+          # 如果上面没找到，尝试常见的安装路径
+          if (-not $msbuild) {
+              $possiblePaths = @(
+                  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+                  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe",
+                  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
+                  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+                  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe",
+                  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe",
+                  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2017\Enterprise\MSBuild\15.0\Bin\MSBuild.exe",
+                  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2017\Professional\MSBuild\15.0\Bin\MSBuild.exe",
+                  "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2017\Community\MSBuild\15.0\Bin\MSBuild.exe"
+              )
+              
+              foreach ($path in $possiblePaths) {
+                  if (Test-Path $path) {
+                      $msbuild = $path
+                      break
+                  }
+              }
           }
-          if (-not (Test-Path $msbuild)) {
-              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+          
+          if (-not $msbuild) {
+              throw "MSBuild.exe not found. Please ensure Visual Studio is installed."
           }
-          if (-not (Test-Path $msbuild)) {
-              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe"
-          }
-          if (-not (Test-Path $msbuild)) {
-              $msbuild = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe"
-          }
-          if (-not (Test-Path $msbuild)) {
-              $msbuild = "MSBuild.exe"  # fallback to PATH
-          }
+          
+          Write-Host "Using MSBuild at: $msbuild"
           
           # 编译X64 Release版本的MP4Box_only
           & $msbuild gpac.sln /maxcpucount /t:Rebuild /p:Configuration="Release - MP4Box_only" /p:Platform=x64 /m
